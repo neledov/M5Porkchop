@@ -24,6 +24,11 @@ int OinkMode::targetIndex = -1;
 uint32_t OinkMode::packetCount = 0;
 uint32_t OinkMode::deauthCount = 0;
 
+// Beacon frame storage for PCAP (required for hashcat)
+uint8_t* OinkMode::beaconFrame = nullptr;
+uint16_t OinkMode::beaconFrameLen = 0;
+bool OinkMode::beaconCaptured = false;
+
 // Channel hop order (most common channels first)
 const uint8_t CHANNEL_HOP_ORDER[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
 const uint8_t CHANNEL_COUNT = sizeof(CHANNEL_HOP_ORDER);
@@ -35,6 +40,14 @@ void OinkMode::init() {
     targetIndex = -1;
     packetCount = 0;
     deauthCount = 0;
+    
+    // Clear beacon frame if any
+    if (beaconFrame) {
+        free(beaconFrame);
+        beaconFrame = nullptr;
+    }
+    beaconFrameLen = 0;
+    beaconCaptured = false;
     
     Serial.println("[OINK] Initialized");
 }
@@ -72,6 +85,14 @@ void OinkMode::stop() {
     scanning = false;
     
     esp_wifi_set_promiscuous(false);
+    
+    // Free beacon frame
+    if (beaconFrame) {
+        free(beaconFrame);
+        beaconFrame = nullptr;
+    }
+    beaconFrameLen = 0;
+    beaconCaptured = false;
     
     running = false;
     Display::setWiFiStatus(false);
@@ -175,12 +196,15 @@ void OinkMode::hopChannel() {
     esp_wifi_set_channel(currentChannel, WIFI_SECOND_CHAN_NONE);
 }
 
-void OinkMode::promiscuousCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
+void IRAM_ATTR OinkMode::promiscuousCallback(void* buf, wifi_promiscuous_pkt_type_t type) {
     if (!running) return;
     
     wifi_promiscuous_pkt_t* pkt = (wifi_promiscuous_pkt_t*)buf;
     uint16_t len = pkt->rx_ctrl.sig_len;
     int8_t rssi = pkt->rx_ctrl.rssi;
+    
+    // ESP32 adds 4 ghost bytes to sig_len
+    if (len > 4) len -= 4;
     
     if (len < 24) return;  // Minimum 802.11 header
     
@@ -226,6 +250,21 @@ void OinkMode::processBeacon(const uint8_t* payload, uint16_t len, int8_t rssi) 
     
     // BSSID is at offset 16
     const uint8_t* bssid = payload + 16;
+    
+    // Capture beacon for target AP (needed for PCAP/hashcat)
+    if (targetIndex >= 0 && !beaconCaptured) {
+        DetectedNetwork* target = &networks[targetIndex];
+        if (memcmp(bssid, target->bssid, 6) == 0) {
+            // Allocate and copy beacon frame
+            beaconFrame = (uint8_t*)malloc(len);
+            if (beaconFrame) {
+                memcpy(beaconFrame, payload, len);
+                beaconFrameLen = len;
+                beaconCaptured = true;
+                Serial.printf("[OINK] Beacon captured for %s (%d bytes)\n", target->ssid, len);
+            }
+        }
+    }
     
     int idx = findNetwork(bssid);
     
@@ -512,6 +551,16 @@ bool OinkMode::saveHandshakePCAP(const CapturedHandshake& hs, const char* path) 
     }
     
     writePCAPHeader(f);
+    
+    // Write beacon frame first (required for hashcat to crack)
+    if (beaconCaptured && beaconFrame && beaconFrameLen > 0) {
+        // Verify beacon is from same BSSID as handshake
+        const uint8_t* beaconBssid = beaconFrame + 16;
+        if (memcmp(beaconBssid, hs.bssid, 6) == 0) {
+            writePCAPPacket(f, beaconFrame, beaconFrameLen, hs.firstSeen);
+            Serial.println("[OINK] Beacon written to PCAP");
+        }
+    }
     
     // Build 802.11 data frame + EAPOL for each captured message
     // We need to reconstruct the full frame for PCAP

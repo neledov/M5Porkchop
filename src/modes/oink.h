@@ -98,8 +98,13 @@ private:
     static uint32_t packetCount;
     static uint32_t deauthCount;
     
-    // Promiscuous mode callback
-    static void promiscuousCallback(void* buf, wifi_promiscuous_pkt_type_t type);
+    // Beacon frame storage (for PCAP)
+    static uint8_t* beaconFrame;
+    static uint16_t beaconFrameLen;
+    static bool beaconCaptured;
+    
+    // Promiscuous mode callback (IRAM for ISR performance)
+    static void IRAM_ATTR promiscuousCallback(void* buf, wifi_promiscuous_pkt_type_t type);
     
     static void processBeacon(const uint8_t* payload, uint16_t len, int8_t rssi);
     static void processDataFrame(const uint8_t* payload, uint16_t len, int8_t rssi);
