@@ -59,8 +59,18 @@ void OinkMode::init() {
     networks.clear();
     handshakes.clear();
     targetIndex = -1;
+    memset(targetBssid, 0, 6);
+    selectionIndex = 0;
     packetCount = 0;
     deauthCount = 0;
+    currentHopIndex = 0;
+    
+    // Reset state machine
+    autoState = AutoState::SCANNING;
+    stateStartTime = 0;
+    attackStartTime = 0;
+    lastDeauthTime = 0;
+    lastMoodUpdate = 0;
     
     // Clear beacon frame if any
     if (beaconFrame) {
@@ -892,16 +902,19 @@ bool OinkMode::saveHandshakePCAP(const CapturedHandshake& hs, const char* path) 
         pkt[2] = 0x00; pkt[3] = 0x00;  // Duration
         
         // Addresses depend on message direction
+        // IEEE 802.11 address fields:
+        // ToDS=0, FromDS=1: Addr1=DA, Addr2=BSSID, Addr3=SA
+        // ToDS=1, FromDS=0: Addr1=BSSID, Addr2=SA, Addr3=DA
         if (i == 0 || i == 2) {  // M1, M3: AP->Station (FromDS=1, ToDS=0)
             pkt[1] = 0x02;  // FromDS=1, ToDS=0
-            memcpy(pkt + 4, hs.station, 6);   // DA
-            memcpy(pkt + 10, hs.bssid, 6);    // BSSID
-            memcpy(pkt + 16, hs.bssid, 6);    // SA
+            memcpy(pkt + 4, hs.station, 6);   // Addr1 = DA (destination = station)
+            memcpy(pkt + 10, hs.bssid, 6);    // Addr2 = BSSID (source = AP)
+            memcpy(pkt + 16, hs.bssid, 6);    // Addr3 = SA (source address)
         } else {  // M2, M4: Station->AP (ToDS=1, FromDS=0)
             pkt[1] = 0x01;  // ToDS=1, FromDS=0
-            memcpy(pkt + 4, hs.bssid, 6);     // BSSID (DA)
-            memcpy(pkt + 10, hs.bssid, 6);    // BSSID
-            memcpy(pkt + 16, hs.station, 6);  // SA
+            memcpy(pkt + 4, hs.bssid, 6);     // Addr1 = BSSID (receiver = AP)
+            memcpy(pkt + 10, hs.station, 6);  // Addr2 = SA (transmitter = station)
+            memcpy(pkt + 16, hs.bssid, 6);    // Addr3 = DA (destination = BSSID)
         }
         
         pkt[22] = 0x00; pkt[23] = 0x00;  // Sequence
@@ -1112,16 +1125,17 @@ void OinkMode::sortNetworksByPriority() {
             if (net.hasHandshake) return 100;
             // PMF protected - can't attack
             if (net.hasPMF) return 99;
+            // Open networks - no handshake to capture
+            if (net.authmode == WIFI_AUTH_OPEN) return 98;
             
             int priority = 50;  // Base
             
             // Has clients = much higher priority (deauth more likely to work)
             if (net.clientCount > 0) priority -= 30;
             
-            // Auth mode priority (weaker = higher priority)
+            // Auth mode priority (weaker = higher priority for cracking)
             switch (net.authmode) {
-                case WIFI_AUTH_OPEN: priority -= 20; break;  // Not useful but fast
-                case WIFI_AUTH_WEP: priority -= 15; break;   // Deprecated
+                case WIFI_AUTH_WEP: priority -= 15; break;   // Deprecated, easy to crack
                 case WIFI_AUTH_WPA_PSK: priority -= 10; break;  // Weak
                 case WIFI_AUTH_WPA_WPA2_PSK: priority -= 5; break;
                 case WIFI_AUTH_WPA2_PSK: priority += 0; break;  // Standard
@@ -1149,6 +1163,7 @@ int OinkMode::getNextTarget() {
     for (int i = 0; i < (int)networks.size(); i++) {
         if (networks[i].hasPMF) continue;
         if (networks[i].hasHandshake) continue;
+        if (networks[i].authmode == WIFI_AUTH_OPEN) continue;  // Open = no handshake
         if (networks[i].clientCount > 0 && networks[i].attackAttempts < 3) {
             return i;
         }
@@ -1158,6 +1173,7 @@ int OinkMode::getNextTarget() {
     for (int i = 0; i < (int)networks.size(); i++) {
         if (networks[i].hasPMF) continue;
         if (networks[i].hasHandshake) continue;
+        if (networks[i].authmode == WIFI_AUTH_OPEN) continue;
         if (networks[i].attackAttempts < 2) {
             return i;
         }
@@ -1167,6 +1183,7 @@ int OinkMode::getNextTarget() {
     for (int i = 0; i < (int)networks.size(); i++) {
         if (networks[i].hasPMF) continue;
         if (networks[i].hasHandshake) continue;
+        if (networks[i].authmode == WIFI_AUTH_OPEN) continue;
         if (networks[i].clientCount > 0) {
             return i;
         }
