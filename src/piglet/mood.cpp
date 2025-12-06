@@ -265,12 +265,12 @@ void Mood::updateAvatarState() {
 void Mood::draw(M5Canvas& canvas) {
     // Calculate bubble size based on message length
     String phrase = currentPhrase;
-    int maxCharsPerLine = 18;
+    int maxCharsPerLine = 16;
     int numLines = 1;
     if (phrase.length() > maxCharsPerLine) numLines = 2;
     if (phrase.length() > maxCharsPerLine * 2) numLines = 3;
     
-    int bubbleX = 75;  // Start of bubble (after piglet)
+    int bubbleX = 115;  // Start of bubble (after bigger piglet)
     int bubbleY = 3;
     int bubbleW = DISPLAY_W - bubbleX - 4;
     int bubbleH = 14 + (numLines * 14);  // Dynamic height based on lines

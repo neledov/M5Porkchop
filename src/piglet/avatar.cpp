@@ -110,12 +110,12 @@ void Avatar::draw(M5Canvas& canvas) {
 
 void Avatar::drawFrame(M5Canvas& canvas, const char** frame, uint8_t lines) {
     canvas.setTextDatum(top_left);
-    canvas.setTextSize(2);  // Smaller font to fit left side
+    canvas.setTextSize(3);  // Bigger piglet
     canvas.setTextColor(COLOR_ACCENT);
     
-    int startX = 4;  // Left margin
-    int startY = 8;  // Start from top of main canvas
-    int lineHeight = 18;  // Line height for font size 2
+    int startX = 2;  // Left margin
+    int startY = 5;  // Start from top of main canvas
+    int lineHeight = 22;  // Line height for font size 3
     
     for (uint8_t i = 0; i < lines; i++) {
         canvas.drawString(frame[i], startX, startY + i * lineHeight);

@@ -9,8 +9,8 @@ enum class PorkchopMode : uint8_t;
 // Display layout constants (240x135 screen)
 #define DISPLAY_W 240
 #define DISPLAY_H 135
-#define TOP_BAR_H 18
-#define BOTTOM_BAR_H 18
+#define TOP_BAR_H 14
+#define BOTTOM_BAR_H 14
 #define MAIN_H (DISPLAY_H - TOP_BAR_H - BOTTOM_BAR_H)
 
 // Colors - Pink on Black theme
