@@ -10,6 +10,8 @@
 #include "../piglet/avatar.h"
 #include "../modes/oink.h"
 #include "../modes/warhog.h"
+#include "../web/fileserver.h"
+#include "config.h"
 
 Porkchop::Porkchop() 
     : currentMode(PorkchopMode::IDLE)
@@ -40,9 +42,10 @@ void Porkchop::init() {
     std::vector<MenuItem> mainMenuItems = {
         {"OINK Mode", 1},
         {"WARHOG Mode", 2},
-        {"Captures", 3},
-        {"Settings", 4},
-        {"About", 5}
+        {"File Transfer", 3},
+        {"Captures", 4},
+        {"Settings", 5},
+        {"About", 6}
     };
     Menu::setItems(mainMenuItems);
     Menu::setTitle("PORKCHOP");
@@ -52,9 +55,10 @@ void Porkchop::init() {
         switch (actionId) {
             case 1: setMode(PorkchopMode::OINK_MODE); break;
             case 2: setMode(PorkchopMode::WARHOG_MODE); break;
-            case 3: setMode(PorkchopMode::CAPTURES); break;
-            case 4: setMode(PorkchopMode::SETTINGS); break;
-            case 5: setMode(PorkchopMode::ABOUT); break;
+            case 3: setMode(PorkchopMode::FILE_TRANSFER); break;
+            case 4: setMode(PorkchopMode::CAPTURES); break;
+            case 5: setMode(PorkchopMode::SETTINGS); break;
+            case 6: setMode(PorkchopMode::ABOUT); break;
         }
         Menu::clearSelected();
     });
@@ -73,11 +77,12 @@ void Porkchop::update() {
 void Porkchop::setMode(PorkchopMode mode) {
     if (mode == currentMode) return;
     
-    // Only save "real" modes as previous (not SETTINGS/ABOUT/MENU/CAPTURES)
+    // Only save "real" modes as previous (not SETTINGS/ABOUT/MENU/CAPTURES/FILE_TRANSFER)
     if (currentMode != PorkchopMode::SETTINGS && 
         currentMode != PorkchopMode::ABOUT && 
         currentMode != PorkchopMode::CAPTURES &&
-        currentMode != PorkchopMode::MENU) {
+        currentMode != PorkchopMode::MENU &&
+        currentMode != PorkchopMode::FILE_TRANSFER) {
         previousMode = currentMode;
     }
     currentMode = mode;
@@ -92,6 +97,9 @@ void Porkchop::setMode(PorkchopMode mode) {
             break;
         case PorkchopMode::MENU:
             Menu::hide();
+            break;
+        case PorkchopMode::FILE_TRANSFER:
+            FileServer::stop();
             break;
         default:
             break;
@@ -119,6 +127,12 @@ void Porkchop::setMode(PorkchopMode mode) {
             break;
         case PorkchopMode::CAPTURES:
             CapturesMenu::show();
+            break;
+        case PorkchopMode::FILE_TRANSFER:
+            Avatar::setState(AvatarState::HAPPY);
+            FileServer::start(Config::wifi().otaSSID.c_str(), Config::wifi().otaPassword.c_str());
+            break;
+        default:
             break;
     }
     
@@ -215,6 +229,14 @@ void Porkchop::handleInput() {
         }
     }
     
+    // FILE_TRANSFER mode - Backspace to stop and return to menu
+    if (currentMode == PorkchopMode::FILE_TRANSFER) {
+        if (M5Cardputer.Keyboard.isKeyPressed(KEY_BACKSPACE)) {
+            setMode(PorkchopMode::MENU);
+            return;
+        }
+    }
+    
     // ESC (fn+backtick) to return to idle
     if (keys.fn && M5Cardputer.Keyboard.isKeyPressed('`')) {
         setMode(PorkchopMode::IDLE);
@@ -234,6 +256,9 @@ void Porkchop::updateMode() {
             if (!CapturesMenu::isActive()) {
                 setMode(PorkchopMode::MENU);
             }
+            break;
+        case PorkchopMode::FILE_TRANSFER:
+            FileServer::update();
             break;
         default:
             break;

@@ -62,6 +62,14 @@ static const uint32_t ATTACK_TIMEOUT = 15000;   // 15 sec per target
 static const uint32_t WAIT_TIME = 2000;         // 2 sec between targets
 
 void OinkMode::init() {
+    // Free per-handshake beacon memory
+    for (auto& hs : handshakes) {
+        if (hs.beaconData) {
+            free(hs.beaconData);
+            hs.beaconData = nullptr;
+        }
+    }
+    
     networks.clear();
     handshakes.clear();
     targetIndex = -1;
@@ -827,6 +835,22 @@ int OinkMode::findOrCreateHandshake(const uint8_t* bssid, const uint8_t* station
     hs.firstSeen = millis();
     hs.lastSeen = millis();
     hs.saved = false;
+    hs.beaconData = nullptr;
+    hs.beaconLen = 0;
+    
+    // Try to copy the global beacon if it matches this BSSID
+    if (beaconCaptured && beaconFrame && beaconFrameLen > 0) {
+        const uint8_t* beaconBssid = beaconFrame + 16;
+        if (memcmp(beaconBssid, bssid, 6) == 0) {
+            hs.beaconData = (uint8_t*)malloc(beaconFrameLen);
+            if (hs.beaconData) {
+                memcpy(hs.beaconData, beaconFrame, beaconFrameLen);
+                hs.beaconLen = beaconFrameLen;
+                Serial.printf("[OINK] Beacon attached to handshake for %02X:%02X:%02X:%02X:%02X:%02X\n",
+                             bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+            }
+        }
+    }
     
     handshakes.push_back(hs);
     return handshakes.size() - 1;
@@ -932,13 +956,21 @@ bool OinkMode::saveHandshakePCAP(const CapturedHandshake& hs, const char* path) 
     
     writePCAPHeader(f);
     
+    int packetCount = 0;
+    
     // Write beacon frame first (required for hashcat to crack)
-    if (beaconCaptured && beaconFrame && beaconFrameLen > 0) {
-        // Verify beacon is from same BSSID as handshake
+    // Try per-handshake beacon first, fall back to global
+    if (hs.hasBeacon()) {
+        writePCAPPacket(f, hs.beaconData, hs.beaconLen, hs.firstSeen);
+        packetCount++;
+        Serial.println("[OINK] Per-handshake beacon written to PCAP");
+    } else if (beaconCaptured && beaconFrame && beaconFrameLen > 0) {
+        // Verify global beacon is from same BSSID as handshake
         const uint8_t* beaconBssid = beaconFrame + 16;
         if (memcmp(beaconBssid, hs.bssid, 6) == 0) {
             writePCAPPacket(f, beaconFrame, beaconFrameLen, hs.firstSeen);
-            Serial.println("[OINK] Beacon written to PCAP");
+            packetCount++;
+            Serial.println("[OINK] Global beacon written to PCAP");
         }
     }
     
@@ -992,7 +1024,16 @@ bool OinkMode::saveHandshakePCAP(const CapturedHandshake& hs, const char* path) 
         pktLen += frame.len;
         
         writePCAPPacket(f, pkt, pktLen, frame.timestamp);
+        packetCount++;
+        Serial.printf("[OINK] EAPOL M%d written to PCAP (%d bytes)\n", i + 1, pktLen);
     }
+    
+    Serial.printf("[OINK] PCAP saved with %d packets (mask: %s%s%s%s)\n", 
+                 packetCount,
+                 hs.hasM1() ? "M1" : "",
+                 hs.hasM2() ? "M2" : "",
+                 hs.hasM3() ? "M3" : "",
+                 hs.hasM4() ? "M4" : "");
     
     f.close();
     return true;

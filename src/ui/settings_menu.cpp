@@ -13,6 +13,9 @@ bool SettingsMenu::active = false;
 bool SettingsMenu::exitRequested = false;
 bool SettingsMenu::keyWasPressed = false;
 bool SettingsMenu::editing = false;
+bool SettingsMenu::textEditing = false;
+String SettingsMenu::textBuffer = "";
+uint8_t SettingsMenu::cursorPos = 0;
 
 void SettingsMenu::init() {
     loadFromConfig();
@@ -21,12 +24,28 @@ void SettingsMenu::init() {
 void SettingsMenu::loadFromConfig() {
     items.clear();
     
+    // WiFi SSID for file transfer
+    items.push_back({
+        "WiFi SSID",
+        SettingType::TEXT,
+        0, 0, 0, 0, "",
+        Config::wifi().otaSSID
+    });
+    
+    // WiFi Password
+    items.push_back({
+        "WiFi Pass",
+        SettingType::TEXT,
+        0, 0, 0, 0, "",
+        Config::wifi().otaPassword
+    });
+    
     // Sound toggle
     items.push_back({
         "Sound",
         SettingType::TOGGLE,
         Config::personality().soundEnabled ? 1 : 0,
-        0, 1, 1, ""
+        0, 1, 1, "", ""
     });
     
     // Brightness (0-100%)
@@ -34,7 +53,7 @@ void SettingsMenu::loadFromConfig() {
         "Brightness",
         SettingType::VALUE,
         (int)Config::personality().brightness,
-        10, 100, 10, "%"
+        10, 100, 10, "%", ""
     });
     
     // Channel hop interval
@@ -42,7 +61,7 @@ void SettingsMenu::loadFromConfig() {
         "CH Hop",
         SettingType::VALUE,
         (int)Config::wifi().channelHopInterval,
-        100, 2000, 100, "ms"
+        100, 2000, 100, "ms", ""
     });
     
     // Scan duration
@@ -50,7 +69,7 @@ void SettingsMenu::loadFromConfig() {
         "Scan Time",
         SettingType::VALUE,
         (int)Config::wifi().scanDuration,
-        500, 5000, 500, "ms"
+        500, 5000, 500, "ms", ""
     });
     
     // Enable deauth
@@ -58,7 +77,7 @@ void SettingsMenu::loadFromConfig() {
         "Deauth",
         SettingType::TOGGLE,
         Config::wifi().enableDeauth ? 1 : 0,
-        0, 1, 1, ""
+        0, 1, 1, "", ""
     });
     
     // GPS enabled
@@ -66,7 +85,7 @@ void SettingsMenu::loadFromConfig() {
         "GPS",
         SettingType::TOGGLE,
         Config::gps().enabled ? 1 : 0,
-        0, 1, 1, ""
+        0, 1, 1, "", ""
     });
     
     // GPS power save
@@ -74,7 +93,7 @@ void SettingsMenu::loadFromConfig() {
         "GPS PwrSave",
         SettingType::TOGGLE,
         Config::gps().powerSave ? 1 : 0,
-        0, 1, 1, ""
+        0, 1, 1, "", ""
     });
     
     // Timezone offset (UTC-12 to UTC+14)
@@ -82,39 +101,41 @@ void SettingsMenu::loadFromConfig() {
         "Timezone",
         SettingType::VALUE,
         (int)Config::gps().timezoneOffset,
-        -12, 14, 1, "h"
+        -12, 14, 1, "h", ""
     });
     
     // Save & Exit action
     items.push_back({
         "< Save & Exit >",
         SettingType::ACTION,
-        0, 0, 0, 0, ""
+        0, 0, 0, 0, "", ""
     });
 }
 
 void SettingsMenu::saveToConfig() {
+    // WiFi settings - SSID and Password from TEXT items
+    auto& w = Config::wifi();
+    w.otaSSID = items[0].textValue;
+    w.otaPassword = items[1].textValue;
+    w.channelHopInterval = items[4].value;
+    w.scanDuration = items[5].value;
+    w.enableDeauth = items[6].value == 1;
+    Config::setWiFi(w);
+    
     // Sound and Brightness
     auto& p = Config::personality();
-    p.soundEnabled = items[0].value == 1;
-    p.brightness = items[1].value;
+    p.soundEnabled = items[2].value == 1;
+    p.brightness = items[3].value;
     Config::setPersonality(p);
     
     // Apply brightness to display
-    M5.Display.setBrightness(items[1].value * 255 / 100);
-    
-    // WiFi settings
-    auto& w = Config::wifi();
-    w.channelHopInterval = items[2].value;
-    w.scanDuration = items[3].value;
-    w.enableDeauth = items[4].value == 1;
-    Config::setWiFi(w);
+    M5.Display.setBrightness(items[3].value * 255 / 100);
     
     // GPS settings
     auto& g = Config::gps();
-    g.enabled = items[5].value == 1;
-    g.powerSave = items[6].value == 1;
-    g.timezoneOffset = items[7].value;
+    g.enabled = items[7].value == 1;
+    g.powerSave = items[8].value == 1;
+    g.timezoneOffset = items[9].value;
     Config::setGPS(g);
     
     // Save to file
@@ -127,6 +148,9 @@ void SettingsMenu::show() {
     selectedIndex = 0;
     scrollOffset = 0;
     editing = false;
+    textEditing = false;
+    textBuffer = "";
+    cursorPos = 0;
     keyWasPressed = true;  // Ignore the Enter that selected us from menu
     loadFromConfig();
 }
@@ -146,6 +170,12 @@ void SettingsMenu::handleInput() {
     
     if (!anyPressed) {
         keyWasPressed = false;
+        return;
+    }
+    
+    // Handle text input mode separately
+    if (textEditing) {
+        handleTextInput();
         return;
     }
     
@@ -205,6 +235,12 @@ void SettingsMenu::handleInput() {
                 // Enter edit mode
                 editing = true;
             }
+        } else if (item.type == SettingType::TEXT) {
+            // Enter text editing mode
+            textEditing = true;
+            textBuffer = item.textValue;
+            cursorPos = textBuffer.length();
+            keyWasPressed = true;  // Prevent immediate character input
         }
     }
     
@@ -215,6 +251,75 @@ void SettingsMenu::handleInput() {
         } else {
             exitRequested = true;
         }
+    }
+}
+
+void SettingsMenu::handleTextInput() {
+    // Get keyboard state first - this captures the current state including shift
+    auto keys = M5Cardputer.Keyboard.keysState();
+    auto& item = items[selectedIndex];
+    
+    // Check if any key is currently pressed
+    bool anyPressed = M5Cardputer.Keyboard.isPressed();
+    
+    if (!anyPressed) {
+        keyWasPressed = false;
+        return;
+    }
+    
+    // For text input, we need to debounce based on whether we have printable chars,
+    // not just any key press. This allows Shift to be held while typing.
+    bool hasPrintableChar = !keys.word.empty();
+    bool hasActionKey = keys.enter || keys.del;
+    
+    // Only debounce if we have something to process
+    if (!hasPrintableChar && !hasActionKey) {
+        // Just modifier keys pressed (shift, fn, etc.) - don't set debounce
+        return;
+    }
+    
+    // Debounce - only act on key down edge for actual characters/actions
+    if (keyWasPressed) return;
+    keyWasPressed = true;
+    
+    // Enter to confirm text
+    if (keys.enter) {
+        item.textValue = textBuffer;
+        textEditing = false;
+        textBuffer = "";
+        cursorPos = 0;
+        return;
+    }
+    
+    // Backspace to delete character
+    if (keys.del) {
+        if (textBuffer.length() > 0) {
+            textBuffer.remove(textBuffer.length() - 1);
+            cursorPos = textBuffer.length();
+        }
+        return;
+    }
+    
+    // Check for backtick to cancel
+    for (char c : keys.word) {
+        if (c == '`') {
+            textEditing = false;
+            textBuffer = "";
+            cursorPos = 0;
+            return;
+        }
+    }
+    
+    // Add typed characters from word vector
+    // The keyboard library handles shift/fn for uppercase and special chars
+    if (textBuffer.length() < 32) {
+        for (char c : keys.word) {
+            // Accept all printable ASCII characters except backtick
+            if (c >= 32 && c <= 126 && c != '`' && textBuffer.length() < 32) {
+                textBuffer += c;
+            }
+        }
+        cursorPos = textBuffer.length();
     }
 }
 
@@ -252,6 +357,26 @@ void SettingsMenu::draw(M5Canvas& canvas) {
                 valStr = "[" + String(item.value) + item.suffix + "]";
             } else {
                 valStr = String(item.value) + item.suffix;
+            }
+        } else if (item.type == SettingType::TEXT) {
+            if (isSelected && textEditing) {
+                // Show text with cursor
+                String display = textBuffer;
+                if (display.length() > 12) {
+                    display = "..." + display.substring(display.length() - 9);
+                }
+                valStr = "[" + display + "_]";
+            } else {
+                // Show stored value, masked for password
+                if (item.label.indexOf("Pass") >= 0 && item.textValue.length() > 0) {
+                    valStr = "****";
+                } else if (item.textValue.length() > 12) {
+                    valStr = item.textValue.substring(0, 9) + "...";
+                } else if (item.textValue.length() > 0) {
+                    valStr = item.textValue;
+                } else {
+                    valStr = "<empty>";
+                }
             }
         } else if (item.type == SettingType::ACTION) {
             // Action - label is the whole thing, centered

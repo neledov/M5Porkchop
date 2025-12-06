@@ -50,11 +50,14 @@ struct CapturedHandshake {
     uint32_t firstSeen;
     uint32_t lastSeen;
     bool saved;  // Already saved to SD
+    uint8_t* beaconData;   // Beacon frame for this AP
+    uint16_t beaconLen;    // Beacon frame length
     
     bool hasM1() const { return capturedMask & 0x01; }
     bool hasM2() const { return capturedMask & 0x02; }
     bool hasM3() const { return capturedMask & 0x04; }
     bool hasM4() const { return capturedMask & 0x08; }
+    bool hasBeacon() const { return beaconData != nullptr && beaconLen > 0; }
     bool isComplete() const { return hasM1() && hasM2(); }  // M1+M2 is enough for crack
     bool isFull() const { return (capturedMask & 0x0F) == 0x0F; }
 };

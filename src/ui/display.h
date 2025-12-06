@@ -59,4 +59,5 @@ private:
     static void drawModeInfo(M5Canvas& canvas, PorkchopMode mode);
     static void drawSettingsScreen(M5Canvas& canvas);
     static void drawAboutScreen(M5Canvas& canvas);
+    static void drawFileTransferScreen(M5Canvas& canvas);
 };

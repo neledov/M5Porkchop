@@ -13,7 +13,8 @@ enum class PorkchopMode : uint8_t {
     MENU,           // Menu navigation
     SETTINGS,       // Settings screen
     CAPTURES,       // View captured handshakes
-    ABOUT           // About screen
+    ABOUT,          // About screen
+    FILE_TRANSFER   // WiFi file transfer mode
 };
 
 // Events for async callbacks

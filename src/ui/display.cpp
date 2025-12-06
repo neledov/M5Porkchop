@@ -9,6 +9,7 @@
 #include "../modes/oink.h"
 #include "../modes/warhog.h"
 #include "../gps/gps.h"
+#include "../web/fileserver.h"
 #include "menu.h"
 #include "settings_menu.h"
 #include "captures_menu.h"
@@ -81,6 +82,10 @@ void Display::update() {
         case PorkchopMode::ABOUT:
             drawAboutScreen(mainCanvas);
             break;
+            
+        case PorkchopMode::FILE_TRANSFER:
+            drawFileTransferScreen(mainCanvas);
+            break;
     }
     
     drawBottomBar();
@@ -132,6 +137,10 @@ void Display::drawTopBar() {
             break;
         case PorkchopMode::ABOUT:
             modeStr = "ABOUT";
+            break;
+        case PorkchopMode::FILE_TRANSFER:
+            modeStr = "XFER";
+            modeColor = COLOR_SUCCESS;
             break;
     }
     
@@ -441,4 +450,49 @@ void Display::drawAboutScreen(M5Canvas& canvas) {
     
     canvas.setTextColor(COLOR_ACCENT);
     canvas.drawString("[Enter] to go back", DISPLAY_W / 2, MAIN_H - 12);
+}
+
+void Display::drawFileTransferScreen(M5Canvas& canvas) {
+    canvas.setTextColor(COLOR_FG);
+    canvas.setTextDatum(top_center);
+    
+    canvas.setTextSize(2);
+    canvas.setTextColor(COLOR_ACCENT);
+    canvas.drawString("FILE TRANSFER", DISPLAY_W / 2, 5);
+    
+    canvas.setTextSize(1);
+    canvas.setTextColor(COLOR_FG);
+    
+    if (FileServer::isRunning() && FileServer::isConnected()) {
+        // Show IP address
+        canvas.drawString("Connected! Browse to:", DISPLAY_W / 2, 30);
+        
+        canvas.setTextColor(COLOR_SUCCESS);
+        String url = "http://" + FileServer::getIP();
+        canvas.drawString(url, DISPLAY_W / 2, 45);
+        
+        canvas.setTextColor(COLOR_FG);
+        canvas.drawString("or http://porkchop.local", DISPLAY_W / 2, 60);
+    } else if (FileServer::isRunning()) {
+        // Server running but WiFi lost
+        canvas.drawString("WiFi disconnected!", DISPLAY_W / 2, 35);
+        canvas.setTextColor(COLOR_ACCENT);
+        canvas.drawString("Reconnecting...", DISPLAY_W / 2, 50);
+    } else {
+        // Not running - check why
+        canvas.setTextColor(COLOR_ACCENT);
+        String ssid = Config::wifi().otaSSID;
+        if (ssid.length() > 0) {
+            canvas.drawString("Connection failed", DISPLAY_W / 2, 35);
+            canvas.drawString("SSID: " + ssid, DISPLAY_W / 2, 50);
+            canvas.setTextColor(COLOR_FG);
+            canvas.drawString(FileServer::getStatus(), DISPLAY_W / 2, 65);
+        } else {
+            canvas.drawString("No WiFi configured!", DISPLAY_W / 2, 35);
+            canvas.drawString("Set SSID in Settings", DISPLAY_W / 2, 50);
+        }
+    }
+    
+    canvas.setTextColor(COLOR_ACCENT);
+    canvas.drawString("[Bksp] to stop", DISPLAY_W / 2, MAIN_H - 12);
 }
